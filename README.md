@@ -1,13 +1,14 @@
 # IRCord Infrastructure
 
-This repository contains the deployable IRCord public-facing package:
-- **Directory Service**: public server listing API (Node.js)
-- **Landing Page**: static marketing and server list site
-- **Nginx**: reverse proxy and TLS termination for production
+Deployable IRCord public-facing infrastructure package:
+- **Directory Service**: Public server listing API (Node.js)
+- **Landing Page**: Static marketing and server list site
+- **Nginx**: Reverse proxy and TLS termination for production
 
 ## Quick Start
 
 ### Prerequisites
+
 - Docker and Docker Compose
 - DNS records for the directory and landing domains
 - TLS certificates for production, or let `deploy.sh` obtain them
@@ -31,8 +32,8 @@ Services:
 ```
 
 The installer asks for:
-- Directory API domain, for example `directory.example.com`
-- Landing page domain, for example `chat.example.com`
+- Directory API domain (e.g., `directory.example.com`)
+- Landing page domain (e.g., `chat.example.com`)
 - TLS mode and optional Let's Encrypt validation method
 
 ## Services
@@ -41,38 +42,50 @@ The installer asks for:
 
 Node.js API for managing public IRCord server listings.
 
-Endpoints:
-- `POST /api/servers/register`
-- `POST /api/servers/ping`
-- `POST /api/servers/unregister`
-- `GET /api/servers`
-- `GET /api/servers/:id`
-- `GET /api/health`
+**Endpoints:**
+- `POST /api/servers/register` — Register a new server
+- `POST /api/servers/ping` — Keep server on the list (5 min interval)
+- `POST /api/servers/unregister` — Remove server from list
+- `GET /api/servers` — List all public servers
+- `GET /api/servers/:id` — Get single server details
+- `GET /api/health` — Health check
 
-Environment variables:
+**Environment variables:**
 - `PORT` - server port, default `3000`
 - `NODE_ENV` - environment name
+- `DATA_DIR` - data directory for persistent storage
+
+**Server timeout:** Servers are removed from the list if they don't ping within 10 minutes.
 
 ### Landing Page (`ircord-landing/`)
 
 Static landing site with:
-- public server list
-- quick connect via `ircord://`
-- manual fallback when the native client is missing
+- Public server list fetched from directory API
+- Quick connect via `ircord://` protocol
+- Manual fallback when the native client is missing
+- Download links for clients
 
 `deploy.sh` generates `ircord-landing/config.js` with the correct directory and landing URLs for the target environment.
 
 ## Structure
 
-```text
+```
 ircord-infra/
-|-- docker-compose.yml
-|-- deploy.sh
-|-- nginx/
-|   |-- nginx.conf
-|   `-- static-site.conf
-|-- ircord-directory/
-`-- ircord-landing/
+├── docker-compose.yml
+├── deploy.sh
+├── nginx/
+│   ├── nginx.conf           # Production reverse proxy + SSL
+│   └── static-site.conf     # Local development static file serving
+├── ircord-directory/
+│   ├── Dockerfile
+│   ├── package.json
+│   ├── server.js            # Directory API with persistent storage
+│   └── README.md
+└── ircord-landing/
+    ├── index.html
+    ├── style.css
+    ├── servers.js           # Server list fetching
+    └── README.md
 ```
 
 ## Deployment
@@ -90,6 +103,12 @@ cd ircord-infra
 sudo ./deploy.sh
 ```
 
+The installer will:
+- Prompt for domain names
+- Obtain SSL certificates (Let's Encrypt or self-signed)
+- Generate runtime configuration
+- Start Docker containers
+
 ### 3. Verify
 
 ```bash
@@ -99,9 +118,9 @@ curl https://chat.example.com
 
 ### 4. DNS
 
-Point both domains to the server:
-- `directory.example.com`
-- `chat.example.com`
+Point both domains to the server IP:
+- `directory.example.com` → Server IP
+- `chat.example.com` → Server IP
 
 ## Maintenance
 
@@ -112,7 +131,7 @@ git pull
 docker-compose --profile production up -d --build
 ```
 
-### Logs
+### View logs
 
 ```bash
 docker-compose logs -f
@@ -124,10 +143,18 @@ docker-compose logs -f nginx
 ### Backup
 
 ```bash
+# Backup directory data
 docker run --rm -v ircord-infra_directory-data:/data -v $(pwd):/backup alpine tar czf /backup/directory-backup.tar.gz -C /data .
 ```
 
-## Local development without Docker
+### Restore
+
+```bash
+# Restore directory data
+docker run --rm -v ircord-infra_directory-data:/data -v $(pwd):/backup alpine tar xzf /backup/directory-backup.tar.gz -C /data
+```
+
+## Local Development Without Docker
 
 ### Directory
 
@@ -145,3 +172,21 @@ python3 -m http.server 8080
 ```
 
 For local landing development, `servers.js` falls back to `http://localhost:3000` if `config.js` is not present.
+
+## IRCord Protocol Handler
+
+The landing page uses the `ircord://` protocol to launch the native client:
+
+```
+ircord://host:port
+```
+
+Example: `ircord://chat.example.com:6697`
+
+If the protocol handler is not installed, the landing page shows manual connection instructions.
+
+## Related Projects
+
+- [ircord-server](../ircord-server) — IRCord server software
+- [ircord-client](../ircord-client) — Desktop client
+- [ircord-android](../ircord-android) — Android client
