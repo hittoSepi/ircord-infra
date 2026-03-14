@@ -1,38 +1,39 @@
 # IRCord Infrastructure
 
-This repository contains the infrastructure components for IRCord:
-- **Directory Service**: Public server listing API (Node.js)
-- **Web Client**: Browser-based fallback for connecting to IRCord servers
+This repository contains the deployable IRCord public-facing package:
+- **Directory Service**: public server listing API (Node.js)
+- **Landing Page**: static marketing and server list site
+- **Nginx**: reverse proxy and TLS termination for production
 
 ## Quick Start
 
 ### Prerequisites
-- Docker & Docker Compose
-- (Optional) SSL certificates for production
+- Docker and Docker Compose
+- DNS records for the directory and landing domains
+- TLS certificates for production, or let `deploy.sh` obtain them
 
 ### Development
 
 ```bash
-# Start all services
 docker-compose up -d
-
-# View logs
 docker-compose logs -f
-
-# Stop services
 docker-compose down
 ```
 
-Services will be available at:
-- Directory API: http://localhost:3000
-- Web Client: http://localhost:8080
+Services:
+- Directory API: `http://localhost:3000`
+- Landing Page: `http://localhost:8080`
 
 ### Production
 
 ```bash
-# Start with nginx reverse proxy and SSL
-docker-compose --profile production up -d
+./deploy.sh
 ```
+
+The installer asks for:
+- Directory API domain, for example `directory.example.com`
+- Landing page domain, for example `chat.example.com`
+- TLS mode and optional Let's Encrypt validation method
 
 ## Services
 
@@ -40,174 +41,107 @@ docker-compose --profile production up -d
 
 Node.js API for managing public IRCord server listings.
 
-**Endpoints:**
-- `POST /api/servers/register` - Register a new server
-- `POST /api/servers/ping` - Keep server alive
-- `GET /api/servers` - List all servers
-- `GET /api/health` - Health check
+Endpoints:
+- `POST /api/servers/register`
+- `POST /api/servers/ping`
+- `POST /api/servers/unregister`
+- `GET /api/servers`
+- `GET /api/servers/:id`
+- `GET /api/health`
 
-**Environment Variables:**
-- `PORT` - Server port (default: 3000)
-- `NODE_ENV` - Environment (development/production)
+Environment variables:
+- `PORT` - server port, default `3000`
+- `NODE_ENV` - environment name
 
-### Web Client (`ircord-webclient/`)
+### Landing Page (`ircord-landing/`)
 
-Static HTML/JS client for connecting to IRCord servers via browser.
+Static landing site with:
+- public server list
+- quick connect via `ircord://`
+- manual fallback when the native client is missing
 
-**Features:**
-- Quick connect to any server
-- Browse public server list
-- Fallback when native client isn't installed
+`deploy.sh` generates `ircord-landing/config.js` with the correct directory and landing URLs for the target environment.
 
-**Query Parameters:**
-- `?server=host&port=6697` - Pre-fill server address
-- `&connect=true` - Auto-connect on load
+## Structure
 
-## Directory Structure
-
-```
+```text
 ircord-infra/
-├── docker-compose.yml      # Orchestration
-├── nginx/
-│   ├── nginx.conf          # Production reverse proxy
-│   └── webclient.conf      # Simple static serving
-├── ircord-directory/       # Directory service
-│   ├── Dockerfile
-│   ├── package.json
-│   ├── server.js
-│   └── README.md
-└── ircord-webclient/       # Web client
-    ├── index.html
-    ├── style.css
-    ├── app.js
-    └── README.md
+|-- docker-compose.yml
+|-- deploy.sh
+|-- nginx/
+|   |-- nginx.conf
+|   `-- static-site.conf
+|-- ircord-directory/
+`-- ircord-landing/
 ```
 
-## Deployment Guide
+## Deployment
 
-### 1. Clone and Configure
+### 1. Clone
 
 ```bash
 git clone <repo-url> ircord-infra
 cd ircord-infra
 ```
 
-### 2. SSL Certificates (Production)
-
-Place certificates in `nginx/ssl/`:
-```
-nginx/ssl/
-├── directory.ircord.dev.crt
-├── directory.ircord.dev.key
-├── web.ircord.dev.crt
-└── web.ircord.dev.key
-```
-
-Or use Let's Encrypt with Certbot.
-
-### 3. Deploy
+### 2. Run installer
 
 ```bash
-# Start services
-docker-compose --profile production up -d
-
-# Verify
-curl https://directory.ircord.dev/api/health
-curl https://web.ircord.dev
+sudo ./deploy.sh
 ```
 
-### 4. Update DNS
+### 3. Verify
 
-Point your domains to the server:
-- `directory.ircord.dev` → Server IP
-- `web.ircord.dev` → Server IP
+```bash
+curl https://directory.example.com/api/health
+curl https://chat.example.com
+```
+
+### 4. DNS
+
+Point both domains to the server:
+- `directory.example.com`
+- `chat.example.com`
 
 ## Maintenance
 
-### Update Services
+### Update services
 
 ```bash
-# Pull latest changes
 git pull
-
-# Rebuild and restart
-docker-compose down
 docker-compose --profile production up -d --build
+```
+
+### Logs
+
+```bash
+docker-compose logs -f
+docker-compose logs -f directory
+docker-compose logs -f landing
+docker-compose logs -f nginx
 ```
 
 ### Backup
 
 ```bash
-# Backup directory data
 docker run --rm -v ircord-infra_directory-data:/data -v $(pwd):/backup alpine tar czf /backup/directory-backup.tar.gz -C /data .
 ```
 
-### View Logs
+## Local development without Docker
 
-```bash
-# All services
-docker-compose logs -f
+### Directory
 
-# Specific service
-docker-compose logs -f directory
-```
-
-## Configuration
-
-### Directory Service
-
-Edit `ircord-directory/server.js`:
-- `SERVER_TIMEOUT_MS` - Server timeout (default: 10 min)
-- `CLEANUP_INTERVAL_MS` - Cleanup interval (default: 1 min)
-
-### Web Client
-
-Edit `ircord-webclient/app.js`:
-- `DIRECTORY_URL` - Directory API endpoint
-- `WEB_CLIENT_URL` - Web client URL
-
-### Nginx
-
-Edit `nginx/nginx.conf`:
-- Rate limiting settings
-- SSL configuration
-- CORS headers
-
-## Troubleshooting
-
-### Directory service not responding
-```bash
-docker-compose ps
-docker-compose logs directory
-```
-
-### Web client not loading
-```bash
-docker-compose logs webclient
-docker-compose logs nginx
-```
-
-### CORS errors
-Check `Access-Control-Allow-Origin` headers in nginx.conf.
-
-## Development
-
-### Local Development Without Docker
-
-**Directory:**
 ```bash
 cd ircord-directory
 npm install
 npm run dev
 ```
 
-**Web Client:**
+### Landing
+
 ```bash
-cd ircord-webclient
+cd ircord-landing
 python3 -m http.server 8080
-# or use any static file server
 ```
 
-## License
-
-MIT
+For local landing development, `servers.js` falls back to `http://localhost:3000` if `config.js` is not present.

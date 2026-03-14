@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IRCord - Encrypted Chat</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <nav>
+      <div class="logo">IRCord</div>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#servers">Servers</a>
+        <a href="#download">Download</a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <h1>IRCord</h1>
+      <p class="tagline">End-to-end encrypted chat. No compromises.</p>
+      <p class="subtitle">A lightweight, open-source messaging client with the simplicity of IRC and modern encryption built in.</p>
+      <a href="#download" class="cta">Download Now</a>
+    </section>
+
+    <section id="features" class="features">
+      <h2>Features</h2>
+      <div class="feature-grid">
+        <div class="feature-card">
+          <h3>E2E Encrypted</h3>
+          <p>Messages are encrypted on your device. The server never sees your plaintext.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Lightweight TUI</h3>
+          <p>Terminal-based interface that runs anywhere with minimal resources.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Channels & DMs</h3>
+          <p>Group channels and private messages, all with strong encryption.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Cross-Platform</h3>
+          <p>Available on Windows, Linux, and Android.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="servers" class="servers">
+      <h2>Public Servers</h2>
+      <p class="servers-subtitle">Join a public IRCord server or <a href="#host">host your own</a></p>
+
+      <div class="servers-container">
+        <div id="servers-loading" class="servers-loading">
+          <span class="spinner"></span>
+          <span>Loading server list...</span>
+        </div>
+        <div id="servers-error" class="servers-error" style="display: none;">
+          <p>Unable to load server list. Please try again later.</p>
+        </div>
+        <div id="servers-list" class="servers-list" style="display: none;">
+          <!-- Server cards will be inserted here by JavaScript -->
+        </div>
+      </div>
+
+      <div class="server-connect">
+        <h3>Quick Connect</h3>
+        <p>Connect to any IRCord server by entering the address below:</p>
+        <div class="connect-form">
+          <input type="text" id="server-address" placeholder="chat.example.com:6697" autocomplete="off">
+          <button id="connect-btn" class="btn btn-primary">Connect</button>
+        </div>
+        <p class="connect-hint">Or use a direct link: <code>ircord://chat.example.com:6697</code></p>
+      </div>
+    </section>
+
+    <section id="download" class="download">
+      <h2>Download</h2>
+      <div class="download-grid">
+        <div class="download-card">
+          <h3>Windows</h3>
+          <p>x64, Windows 10+</p>
+          <a href="https://files.rausku.com/ircord-latest.zip" class="btn">ircord-win-x64.zip</a>
+        </div>
+        <div class="download-card">
+          <h3>Linux</h3>
+          <p>x64, glibc 2.31+</p>
+          <a href="#" class="btn">ircord-linux-x64.tar.gz</a>
+        </div>
+        <div class="download-card">
+          <h3>Android</h3>
+          <p>ARM64, Android 10+</p>
+          <a href="https://files.rausku.com/ircord-latest.apk" class="btn">ircord.apk</a>
+        </div>
+      </div>
+    </section>
+
+    <section id="host" class="host">
+      <h2>Host Your Own Server</h2>
+      <div class="host-content">
+        <p>Want to run your own IRCord server? It's easy!</p>
+        <ol class="host-steps">
+          <li>Download the server binary for your platform</li>
+          <li>Generate TLS certificates</li>
+          <li>Edit the configuration file</li>
+          <li>Run the server</li>
+        </ol>
+        <div class="host-code">
+          <pre><code># Quick start
+./ircord-server --config server.toml
+
+# Enable public listing (optional)
+# Edit server.toml and set:
+# [server]
+# public = true
+#
+# [directory]
+# enabled = true
+# server_name = "My Awesome Server"
+# description = "A friendly place to chat"</code></pre>
+        </div>
+        <a href="https://github.com/hittoSepi/ircord" class="btn" target="_blank">View Documentation</a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>IRCord &mdash; Open source, encrypted messaging.</p>
+    <p class="footer-links">
+      <a href="https://github.com/hittoSepi/ircord" target="_blank">GitHub</a> &bull;
+      <a href="#" id="protocol-handler">Install Protocol Handler</a>
+    </p>
+  </footer>
+
+  <script src="config.js"></script>
+  <script src="servers.js"></script>
+</body>
+</html>
