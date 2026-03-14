@@ -6,11 +6,24 @@
  */
 
 const DEFAULT_CONFIG = {
-    DIRECTORY_URL: 'http://localhost:3000'
+    DIRECTORY_URL: getDefaultDirectoryUrl()
 };
 
 const RUNTIME_CONFIG = window.IRCORD_CONFIG || {};
 const DIRECTORY_URL = normalizeBaseUrl(RUNTIME_CONFIG.DIRECTORY_URL || DEFAULT_CONFIG.DIRECTORY_URL);
+
+function getDefaultDirectoryUrl() {
+    if (typeof window === 'undefined' || !window.location) {
+        return 'http://localhost:3000';
+    }
+
+    const host = window.location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1') {
+        return 'http://localhost:3000';
+    }
+
+    return window.location.origin;
+}
 
 function normalizeBaseUrl(url) {
     return String(url || '').replace(/\/+$/, '');

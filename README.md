@@ -25,6 +25,22 @@ Services:
 - Directory API: `http://localhost:3000`
 - Landing Page: `http://localhost:8080`
 
+The published ports are bound to `127.0.0.1`, so they stay available for a host-level nginx reverse proxy without exposing the containers directly.
+
+### Host nginx reverse proxy
+
+If the server already runs nginx for TLS, do not start the Docker `nginx` service. Start only:
+
+```bash
+docker compose up -d directory landing
+```
+
+Then point the host nginx config at:
+- `127.0.0.1:8080` for the landing page
+- `127.0.0.1:3000` for the directory API
+
+An example config is available at `nginx/host-proxy.conf.example`.
+
 ### Production
 
 ```bash
@@ -35,6 +51,8 @@ The installer asks for:
 - Directory API domain (e.g., `directory.example.com`)
 - Landing page domain (e.g., `chat.example.com`)
 - TLS mode and optional Let's Encrypt validation method
+
+`deploy.sh` is for the bundled Docker nginx setup that terminates TLS itself. If you already have nginx on the host and it owns ports `80/443`, use the host nginx flow above instead of the Docker `nginx` service.
 
 ## Services
 
@@ -171,7 +189,7 @@ cd ircord-landing
 python3 -m http.server 8080
 ```
 
-For local landing development, `servers.js` falls back to `http://localhost:3000` if `config.js` is not present.
+For local landing development, `servers.js` falls back to `http://localhost:3000` if `config.js` is not present. On non-localhost deployments it falls back to the current site origin, which lets a host nginx config proxy `/api/` on the same domain.
 
 ## IRCord Protocol Handler
 
