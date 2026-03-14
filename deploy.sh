@@ -7,11 +7,18 @@
 #   sudo ./deploy.sh
 #
 # Environment variables (optional):
-#   IRCORD_DIR_DOMAIN      - Directory API domain
-#   IRCORD_LANDING_DOMAIN  - Landing page domain
-#   IRCORD_USE_LETSENCRYPT - "yes", "selfsigned", or "skip"
-#   IRCORD_LE_METHOD       - "standalone" or "dns-cloudflare"
-#   IRCORD_CF_TOKEN        - Cloudflare API token for DNS validation
+#   IRCORD_DIR_DOMAIN       - Directory API domain
+#   IRCORD_LANDING_DOMAIN   - Landing page domain
+#   IRCORD_TURN_ENABLED     - "yes" or "no"
+#   IRCORD_TURN_DOMAIN      - TURN domain (default: landing domain)
+#   IRCORD_TURN_REALM       - TURN realm (default: TURN domain)
+#   IRCORD_TURN_USERNAME    - Static TURN username
+#   IRCORD_TURN_PASSWORD    - Static TURN password
+#   IRCORD_TURN_CERT_PATH   - Optional source certificate path for TURN
+#   IRCORD_TURN_KEY_PATH    - Optional source private key path for TURN
+#   IRCORD_USE_LETSENCRYPT  - "yes", "selfsigned", or "skip"
+#   IRCORD_LE_METHOD        - "standalone" or "dns-cloudflare"
+#   IRCORD_CF_TOKEN         - Cloudflare API token for DNS validation
 # =============================================================================
 set -euo pipefail
 
@@ -37,10 +44,11 @@ step()  {
 REPO_URL="https://github.com/hittoSepi/ircord-infra.git"
 INSTALL_DIR="/opt/ircord-infra"
 SSL_DIR="$INSTALL_DIR/nginx/ssl"
+TURN_DIR="$INSTALL_DIR/turn"
+DC=""
 
 validate_domain() {
     local domain="$1"
-
     if [[ ! "$domain" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$ ]]; then
         warn "Domain format looks unusual: $domain"
         read -rp "  Continue anyway? (y/N) " -n 1 -r
@@ -107,10 +115,50 @@ collect_cloudflare_token() {
     ensure_value "Cloudflare API token" "${IRCORD_CF_TOKEN:-}"
 }
 
+collect_turn_settings() {
+    if [ -z "${IRCORD_TURN_ENABLED:-}" ]; then
+        read -rp "  Enable TURN/ICE server for desktop voice? (Y/n) " -n 1 -r
+        echo ""
+        [[ -z "${REPLY:-}" || $REPLY =~ ^[Yy]$ ]] && IRCORD_TURN_ENABLED="yes" || IRCORD_TURN_ENABLED="no"
+    fi
+
+    if [ "${IRCORD_TURN_ENABLED}" != "yes" ]; then
+        IRCORD_TURN_ENABLED="no"
+        return
+    fi
+
+    if [ -z "${IRCORD_TURN_DOMAIN:-}" ]; then
+        read -rp "  TURN domain [${IRCORD_LANDING_DOMAIN}]: " IRCORD_TURN_DOMAIN
+        echo ""
+    fi
+    IRCORD_TURN_DOMAIN="${IRCORD_TURN_DOMAIN:-$IRCORD_LANDING_DOMAIN}"
+    ensure_value "TURN domain" "$IRCORD_TURN_DOMAIN"
+    validate_domain "$IRCORD_TURN_DOMAIN"
+
+    IRCORD_TURN_REALM="${IRCORD_TURN_REALM:-$IRCORD_TURN_DOMAIN}"
+
+    if [ -z "${IRCORD_TURN_USERNAME:-}" ]; then
+        read -rp "  TURN username [ircord]: " IRCORD_TURN_USERNAME
+        echo ""
+    fi
+    IRCORD_TURN_USERNAME="${IRCORD_TURN_USERNAME:-ircord}"
+
+    if [ -z "${IRCORD_TURN_PASSWORD:-}" ]; then
+        local generated_password
+        generated_password="$(openssl rand -hex 16)"
+        read -rp "  TURN password [${generated_password}]: " IRCORD_TURN_PASSWORD
+        echo ""
+        IRCORD_TURN_PASSWORD="${IRCORD_TURN_PASSWORD:-$generated_password}"
+    fi
+
+    ensure_value "TURN username" "$IRCORD_TURN_USERNAME"
+    ensure_value "TURN password" "$IRCORD_TURN_PASSWORD"
+}
+
 install_dependencies() {
     apt-get update -qq
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-        ca-certificates certbot git openssl ufw
+        ca-certificates certbot curl git openssl ufw
 
     if [ "${IRCORD_USE_LETSENCRYPT:-}" = "yes" ] && [ "${IRCORD_LE_METHOD:-}" = "dns-cloudflare" ]; then
         DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3-certbot-dns-cloudflare
@@ -164,12 +212,29 @@ clone_or_update_repo() {
         ok "Repository cloned"
     fi
 
-    mkdir -p "$SSL_DIR"
+    mkdir -p "$SSL_DIR" "$TURN_DIR"
     [ -d "$INSTALL_DIR/ircord-landing" ] || error "Expected landing page files in $INSTALL_DIR/ircord-landing"
+}
+
+copy_cert_pair() {
+    local src_cert="$1"
+    local src_key="$2"
+    local dst_cert="$3"
+    local dst_key="$4"
+
+    [ -f "$src_cert" ] || error "Certificate not found: $src_cert"
+    [ -f "$src_key" ] || error "Private key not found: $src_key"
+
+    cp "$src_cert" "$dst_cert"
+    cp "$src_key" "$dst_key"
+    chmod 644 "$dst_cert"
+    chmod 600 "$dst_key"
 }
 
 obtain_cert_le() {
     local domain="$1"
+    local dst_cert="$2"
+    local dst_key="$3"
     local cert_src="/etc/letsencrypt/live/$domain/fullchain.pem"
     local key_src="/etc/letsencrypt/live/$domain/privkey.pem"
 
@@ -204,65 +269,82 @@ obtain_cert_le() {
             -d "$domain"
     fi
 
-    [ -f "$cert_src" ] || error "Certificate acquisition failed for $domain"
-    [ -f "$key_src" ] || error "Private key acquisition failed for $domain"
-
-    cp "$cert_src" "$SSL_DIR/${domain}.crt"
-    cp "$key_src" "$SSL_DIR/${domain}.key"
-    chmod 644 "$SSL_DIR/${domain}.crt"
-    chmod 600 "$SSL_DIR/${domain}.key"
-    ok "Certificate ready: $SSL_DIR/${domain}.crt"
+    copy_cert_pair "$cert_src" "$key_src" "$dst_cert" "$dst_key"
+    ok "Certificate ready: $dst_cert"
 }
 
 generate_selfsigned() {
     local domain="$1"
+    local dst_cert="$2"
+    local dst_key="$3"
 
     info "Generating self-signed certificate for $domain"
     openssl req -x509 -newkey rsa:4096 \
-        -keyout "$SSL_DIR/${domain}.key" \
-        -out "$SSL_DIR/${domain}.crt" \
+        -keyout "$dst_key" \
+        -out "$dst_cert" \
         -days 365 \
         -nodes \
         -subj "/CN=$domain" >/dev/null 2>&1
 
-    chmod 644 "$SSL_DIR/${domain}.crt"
-    chmod 600 "$SSL_DIR/${domain}.key"
-    ok "Self-signed certificate ready: $SSL_DIR/${domain}.crt"
+    chmod 644 "$dst_cert"
+    chmod 600 "$dst_key"
+    ok "Self-signed certificate ready: $dst_cert"
 }
 
-prepare_certificates() {
-    local dir_cert="$SSL_DIR/${IRCORD_DIR_DOMAIN}.crt"
-    local dir_key="$SSL_DIR/${IRCORD_DIR_DOMAIN}.key"
-    local landing_cert="$SSL_DIR/${IRCORD_LANDING_DOMAIN}.crt"
-    local landing_key="$SSL_DIR/${IRCORD_LANDING_DOMAIN}.key"
+prepare_domain_cert() {
+    local domain="$1"
+    local dst_cert="$2"
+    local dst_key="$3"
+    local custom_cert="${4:-}"
+    local custom_key="${5:-}"
+
+    if [ -f "$dst_cert" ] && [ -f "$dst_key" ]; then
+        ok "Certificate already staged: $dst_cert"
+        return
+    fi
 
     case "$IRCORD_USE_LETSENCRYPT" in
         yes)
-            obtain_cert_le "$IRCORD_DIR_DOMAIN"
-            obtain_cert_le "$IRCORD_LANDING_DOMAIN"
+            obtain_cert_le "$domain" "$dst_cert" "$dst_key"
             ;;
         selfsigned)
-            generate_selfsigned "$IRCORD_DIR_DOMAIN"
-            generate_selfsigned "$IRCORD_LANDING_DOMAIN"
+            generate_selfsigned "$domain" "$dst_cert" "$dst_key"
             ;;
         skip)
-            warn "Skipping certificate generation"
-            warn "Place certificates at:"
-            warn "  $dir_cert"
-            warn "  $dir_key"
-            warn "  $landing_cert"
-            warn "  $landing_key"
-
-            if [ ! -f "$dir_cert" ] || [ ! -f "$dir_key" ] || [ ! -f "$landing_cert" ] || [ ! -f "$landing_key" ]; then
-                read -rp "  Required certificate files are missing. Continue anyway? (y/N) " -n 1 -r
-                echo ""
-                [[ $REPLY =~ ^[Yy]$ ]] || exit 1
+            if [ -n "$custom_cert" ] && [ -n "$custom_key" ]; then
+                copy_cert_pair "$custom_cert" "$custom_key" "$dst_cert" "$dst_key"
+                ok "Copied custom certificate for $domain"
+            else
+                warn "Skipping certificate generation for $domain"
+                warn "Place certificate at: $dst_cert"
+                warn "Place private key at: $dst_key"
             fi
             ;;
         *)
             error "Unknown SSL option: $IRCORD_USE_LETSENCRYPT"
             ;;
     esac
+}
+
+prepare_certificates() {
+    prepare_domain_cert \
+        "$IRCORD_DIR_DOMAIN" \
+        "$SSL_DIR/${IRCORD_DIR_DOMAIN}.crt" \
+        "$SSL_DIR/${IRCORD_DIR_DOMAIN}.key"
+
+    prepare_domain_cert \
+        "$IRCORD_LANDING_DOMAIN" \
+        "$SSL_DIR/${IRCORD_LANDING_DOMAIN}.crt" \
+        "$SSL_DIR/${IRCORD_LANDING_DOMAIN}.key"
+
+    if [ "${IRCORD_TURN_ENABLED}" = "yes" ]; then
+        prepare_domain_cert \
+            "$IRCORD_TURN_DOMAIN" \
+            "$SSL_DIR/${IRCORD_TURN_DOMAIN}.crt" \
+            "$SSL_DIR/${IRCORD_TURN_DOMAIN}.key" \
+            "${IRCORD_TURN_CERT_PATH:-}" \
+            "${IRCORD_TURN_KEY_PATH:-}"
+    fi
 }
 
 install_certbot_hook() {
@@ -274,7 +356,8 @@ install_certbot_hook() {
     cat > /etc/letsencrypt/renewal-hooks/post/ircord-infra.sh <<HOOK
 #!/bin/bash
 set -euo pipefail
-for domain in ${IRCORD_DIR_DOMAIN} ${IRCORD_LANDING_DOMAIN}; do
+for domain in ${IRCORD_DIR_DOMAIN} ${IRCORD_LANDING_DOMAIN} ${IRCORD_TURN_DOMAIN:-}; do
+    [ -n "\$domain" ] || continue
     src="/etc/letsencrypt/live/\$domain"
     dst="${SSL_DIR}"
     [ -f "\$src/fullchain.pem" ] && cp "\$src/fullchain.pem" "\$dst/\${domain}.crt"
@@ -282,7 +365,7 @@ for domain in ${IRCORD_DIR_DOMAIN} ${IRCORD_LANDING_DOMAIN}; do
     chmod 644 "\$dst/\${domain}.crt" 2>/dev/null || true
     chmod 600 "\$dst/\${domain}.key" 2>/dev/null || true
 done
-docker exec ircord-nginx nginx -s reload 2>/dev/null || true
+cd "${INSTALL_DIR}" && ${DC} restart turn >/dev/null 2>&1 || true
 HOOK
     chmod +x /etc/letsencrypt/renewal-hooks/post/ircord-infra.sh
     ok "Certbot renewal hook installed"
@@ -297,6 +380,48 @@ window.IRCORD_CONFIG = {
 EOF
 
     ok "Landing config generated"
+}
+
+detect_turn_external_ip() {
+    local ip=""
+    ip="$(getent ahostsv4 "$IRCORD_TURN_DOMAIN" 2>/dev/null | awk 'NR==1 {print $1; exit}')"
+    if [ -z "$ip" ]; then
+        ip="$(curl -4 -fsS https://api.ipify.org 2>/dev/null || true)"
+    fi
+    if [ -z "$ip" ]; then
+        ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+    fi
+    printf '%s' "$ip"
+}
+
+generate_turn_config() {
+    if [ "${IRCORD_TURN_ENABLED}" != "yes" ]; then
+        return
+    fi
+
+    local external_ip
+    external_ip="$(detect_turn_external_ip)"
+
+    cat > "$TURN_DIR/turnserver.conf" <<EOF
+fingerprint
+lt-cred-mech
+realm=${IRCORD_TURN_REALM}
+user=${IRCORD_TURN_USERNAME}:${IRCORD_TURN_PASSWORD}
+listening-ip=0.0.0.0
+${external_ip:+external-ip=${external_ip}}
+listening-port=3478
+tls-listening-port=5349
+min-port=49160
+max-port=49200
+cert=/etc/coturn/certs/${IRCORD_TURN_DOMAIN}.crt
+pkey=/etc/coturn/certs/${IRCORD_TURN_DOMAIN}.key
+no-cli
+no-multicast-peers
+no-tlsv1
+no-tlsv1_1
+EOF
+
+    ok "TURN config generated"
 }
 
 generate_nginx_config() {
@@ -421,14 +546,23 @@ configure_firewall() {
     ufw allow 22/tcp comment "SSH" >/dev/null 2>&1 || true
     ufw allow 80/tcp comment "HTTP" >/dev/null 2>&1 || true
     ufw allow 443/tcp comment "HTTPS" >/dev/null 2>&1 || true
+
+    if [ "${IRCORD_TURN_ENABLED}" = "yes" ]; then
+        ufw allow 3478/tcp comment "TURN TCP" >/dev/null 2>&1 || true
+        ufw allow 3478/udp comment "TURN UDP" >/dev/null 2>&1 || true
+        ufw allow 5349/tcp comment "TURNS TCP" >/dev/null 2>&1 || true
+        ufw allow 5349/udp comment "TURNS UDP" >/dev/null 2>&1 || true
+        ufw allow 49160:49200/udp comment "TURN relay UDP" >/dev/null 2>&1 || true
+    fi
+
     ufw --force enable >/dev/null 2>&1 || true
-    ok "UFW configured for ports 22, 80 and 443"
+    ok "UFW configured"
 }
 
 start_services() {
     cd "$INSTALL_DIR"
-    $DC --profile production down >/dev/null 2>&1 || true
-    $DC --profile production up -d --build
+    $DC down >/dev/null 2>&1 || true
+    $DC up -d --build
     ok "Services started"
 }
 
@@ -441,14 +575,17 @@ verify_services() {
     else
         warn "Directory service health check failed (it may still be starting)"
     fi
+
+    if [ "${IRCORD_TURN_ENABLED}" = "yes" ]; then
+        if ss -tuln | grep -qE ':(3478|5349)\s'; then
+            ok "TURN ports are listening"
+        else
+            warn "TURN ports are not listening yet"
+        fi
+    fi
 }
 
 show_summary() {
-    local dir_cert="$SSL_DIR/${IRCORD_DIR_DOMAIN}.crt"
-    local dir_key="$SSL_DIR/${IRCORD_DIR_DOMAIN}.key"
-    local landing_cert="$SSL_DIR/${IRCORD_LANDING_DOMAIN}.crt"
-    local landing_key="$SSL_DIR/${IRCORD_LANDING_DOMAIN}.key"
-
     echo ""
     echo -e "${GREEN}============================================================${NC}"
     echo -e "${GREEN}  IRCord infrastructure installed successfully${NC}"
@@ -456,22 +593,22 @@ show_summary() {
     echo ""
     echo -e "  Directory API:  ${CYAN}https://${IRCORD_DIR_DOMAIN}${NC}"
     echo -e "  Landing Page:   ${CYAN}https://${IRCORD_LANDING_DOMAIN}${NC}"
+    if [ "${IRCORD_TURN_ENABLED}" = "yes" ]; then
+        echo -e "  TURN:           ${CYAN}${IRCORD_TURN_DOMAIN}${NC} (3478 / 5349)"
+        echo -e "  TURN user:      ${CYAN}${IRCORD_TURN_USERNAME}${NC}"
+    fi
     echo -e "  Install dir:    ${INSTALL_DIR}"
     echo ""
     echo -e "  Logs:    cd ${INSTALL_DIR} && ${DC} logs -f"
-    echo -e "  Stop:    cd ${INSTALL_DIR} && ${DC} --profile production down"
-    echo -e "  Update:  cd ${INSTALL_DIR} && git pull && ${DC} --profile production up -d --build"
+    echo -e "  Stop:    cd ${INSTALL_DIR} && ${DC} down"
+    echo -e "  Update:  cd ${INSTALL_DIR} && git pull && ${DC} up -d --build"
     echo ""
 
     if [ "$IRCORD_USE_LETSENCRYPT" = "skip" ]; then
         echo -e "  ${YELLOW}Action required:${NC}"
-        echo -e "    Place certificates at:"
-        echo -e "      ${dir_cert}"
-        echo -e "      ${dir_key}"
-        echo -e "      ${landing_cert}"
-        echo -e "      ${landing_key}"
-        echo -e "    Then restart nginx:"
-        echo -e "      cd ${INSTALL_DIR} && ${DC} --profile production restart nginx"
+        echo -e "    Ensure certificates exist under ${SSL_DIR}"
+        echo -e "    Then restart services:"
+        echo -e "      cd ${INSTALL_DIR} && ${DC} restart"
         echo ""
     fi
 }
@@ -492,6 +629,7 @@ fi
 ensure_value "Landing page domain" "$IRCORD_LANDING_DOMAIN"
 validate_domain "$IRCORD_LANDING_DOMAIN"
 
+collect_turn_settings
 choose_ssl_mode
 choose_le_method
 collect_cloudflare_token
@@ -500,6 +638,12 @@ echo ""
 info "Configuration summary:"
 echo "  Directory API:  $IRCORD_DIR_DOMAIN"
 echo "  Landing Page:   $IRCORD_LANDING_DOMAIN"
+echo "  TURN enabled:   $IRCORD_TURN_ENABLED"
+if [ "$IRCORD_TURN_ENABLED" = "yes" ]; then
+    echo "  TURN domain:    $IRCORD_TURN_DOMAIN"
+    echo "  TURN realm:     $IRCORD_TURN_REALM"
+    echo "  TURN username:  $IRCORD_TURN_USERNAME"
+fi
 echo "  SSL:            $IRCORD_USE_LETSENCRYPT"
 [ "${IRCORD_USE_LETSENCRYPT:-}" = "yes" ] && echo "  LE Method:      ${IRCORD_LE_METHOD:-standalone}"
 echo "  Install dir:    $INSTALL_DIR"
@@ -518,8 +662,9 @@ step "3/5 TLS certificates"
 prepare_certificates
 install_certbot_hook
 
-step "4/5 Generate site and nginx config"
+step "4/5 Generate runtime config"
 generate_landing_config
+generate_turn_config
 generate_nginx_config
 configure_firewall
 

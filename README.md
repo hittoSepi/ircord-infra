@@ -3,6 +3,7 @@
 Deployable IRCord public-facing infrastructure package:
 - **Directory Service**: Public server listing API (Node.js)
 - **Landing Page**: Static marketing and server list site
+- **TURN Service**: Coturn-based ICE relay for desktop voice
 - **Nginx**: Reverse proxy and TLS termination for production
 
 ## Quick Start
@@ -24,6 +25,7 @@ docker-compose down
 Services:
 - Directory API: `http://localhost:3000`
 - Landing Page: `http://localhost:8080`
+- TURN: `3478/tcp+udp`, `5349/tcp+udp`, relay UDP `49160-49200`
 
 The published ports are bound to `127.0.0.1`, so they stay available for a host-level nginx reverse proxy without exposing the containers directly.
 
@@ -32,7 +34,7 @@ The published ports are bound to `127.0.0.1`, so they stay available for a host-
 If the server already runs nginx for TLS, do not start the Docker `nginx` service. Start only:
 
 ```bash
-docker compose up -d directory landing
+docker compose up -d directory landing turn
 ```
 
 Then point the host nginx config at:
@@ -40,6 +42,7 @@ Then point the host nginx config at:
 - `127.0.0.1:3000` for the directory API
 
 An example config is available at `nginx/host-proxy.conf.example`.
+TURN stays outside nginx and listens directly on `3478` / `5349`. This deployment does not use port `443` for TURN.
 
 ### Production
 
@@ -50,6 +53,7 @@ An example config is available at `nginx/host-proxy.conf.example`.
 The installer asks for:
 - Directory API domain (e.g., `directory.example.com`)
 - Landing page domain (e.g., `chat.example.com`)
+- Optional TURN domain and static TURN credentials
 - TLS mode and optional Let's Encrypt validation method
 
 `deploy.sh` is for the bundled Docker nginx setup that terminates TLS itself. If you already have nginx on the host and it owns ports `80/443`, use the host nginx flow above instead of the Docker `nginx` service.
@@ -84,6 +88,19 @@ Static landing site with:
 - Download links for clients
 
 `deploy.sh` generates `ircord-landing/config.js` with the correct directory and landing URLs for the target environment.
+
+### TURN Service (`turn/`)
+
+Coturn-based STUN/TURN relay for desktop WebRTC voice.
+
+Default ports:
+- `3478/tcp`
+- `3478/udp`
+- `5349/tcp`
+- `5349/udp`
+- relay UDP range `49160-49200`
+
+`deploy.sh` generates `turn/turnserver.conf` with the selected domain, credentials, relay ports, and certificate paths.
 
 ## Structure
 
@@ -123,6 +140,7 @@ sudo ./deploy.sh
 
 The installer will:
 - Prompt for domain names
+- Prompt for optional TURN/ICE settings
 - Obtain SSL certificates (Let's Encrypt or self-signed)
 - Generate runtime configuration
 - Start Docker containers
@@ -132,6 +150,7 @@ The installer will:
 ```bash
 curl https://directory.example.com/api/health
 curl https://chat.example.com
+turnutils_uclient -T -n 1 -u ircord -w 'your-turn-password' turn.example.com
 ```
 
 ### 4. DNS
@@ -139,6 +158,9 @@ curl https://chat.example.com
 Point both domains to the server IP:
 - `directory.example.com` → Server IP
 - `chat.example.com` → Server IP
+
+If TURN is enabled, also point the TURN domain to the same server IP:
+- `turn.example.com` -> Server IP
 
 ## Maintenance
 
@@ -155,6 +177,7 @@ docker-compose --profile production up -d --build
 docker-compose logs -f
 docker-compose logs -f directory
 docker-compose logs -f landing
+docker-compose logs -f turn
 docker-compose logs -f nginx
 ```
 

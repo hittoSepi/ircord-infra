@@ -15,6 +15,7 @@ nginx/ssl/*.pem
 .env
 .env.local
 ircord-landing/config.js
+turn/turnserver.conf
 
 # Logs
 *.log
