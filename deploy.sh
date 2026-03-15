@@ -46,6 +46,7 @@ INSTALL_DIR="/opt/ircord-infra"
 SSL_DIR="$INSTALL_DIR/nginx/ssl"
 TURN_DIR="$INSTALL_DIR/turn"
 DC=""
+SERVICES=()
 
 validate_domain() {
     local domain="$1"
@@ -199,6 +200,13 @@ install_dependencies() {
     fi
 
     ok "Docker Compose ready"
+}
+
+collect_services() {
+    SERVICES=(directory landing)
+    if [ -s "$TURN_DIR/turnserver.conf" ]; then
+        SERVICES+=(turn)
+    fi
 }
 
 clone_or_update_repo() {
@@ -559,10 +567,16 @@ configure_firewall() {
     ok "UFW configured"
 }
 
+install_update_script() {
+    install -m 755 "$INSTALL_DIR/update.sh" /usr/local/bin/ircord-infra-update
+    ok "Update script: /usr/local/bin/ircord-infra-update"
+}
+
 start_services() {
     cd "$INSTALL_DIR"
+    collect_services
     $DC down >/dev/null 2>&1 || true
-    $DC up -d --build
+    $DC up -d --build "${SERVICES[@]}"
     ok "Services started"
 }
 
@@ -601,7 +615,7 @@ show_summary() {
     echo ""
     echo -e "  Logs:    cd ${INSTALL_DIR} && ${DC} logs -f"
     echo -e "  Stop:    cd ${INSTALL_DIR} && ${DC} down"
-    echo -e "  Update:  cd ${INSTALL_DIR} && git pull && ${DC} up -d --build"
+    echo -e "  Update:  sudo ircord-infra-update"
     echo ""
 
     if [ "$IRCORD_USE_LETSENCRYPT" = "skip" ]; then
@@ -667,6 +681,7 @@ generate_landing_config
 generate_turn_config
 generate_nginx_config
 configure_firewall
+install_update_script
 
 step "5/5 Start services"
 start_services

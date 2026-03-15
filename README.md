@@ -167,9 +167,10 @@ If TURN is enabled, also point the TURN domain to the same server IP:
 ### Update services
 
 ```bash
-git pull
-docker-compose --profile production up -d --build
+sudo ircord-infra-update
 ```
+
+The update command refreshes `/opt/ircord-infra` from git, reinstalls the helper itself, and rebuilds the active Docker services. It starts `turn` only when `turn/turnserver.conf` exists.
 
 ### View logs
 
