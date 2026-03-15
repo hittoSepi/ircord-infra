@@ -43,6 +43,7 @@ Then point the host nginx config at:
 
 An example config is available at `nginx/host-proxy.conf.example`.
 TURN stays outside nginx and listens directly on `3478` / `5349`. This deployment does not use port `443` for TURN.
+If landing and directory use different domains, the reverse proxy for the directory domain must return `Access-Control-Allow-Origin` for `/api/` responses.
 
 ### Production
 
